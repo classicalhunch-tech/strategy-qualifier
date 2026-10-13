@@ -33,7 +33,7 @@ For the extracted SMC strategy, use the fork-compatible replay engine:
 import pandas as pd
 from strategy_qualifier.strategies.fork_smc import run_backtest
 
-bars = pd.read_csv("your_ohlc.csv")  # timestamp, open, high, low, close
+bars = pd.read_csv("your_ohlc.csv", parse_dates=["timestamp"]).set_index("timestamp")
 result = run_backtest(
     bars,
     reward_multiple=2.0,
