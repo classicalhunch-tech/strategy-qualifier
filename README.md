@@ -121,7 +121,8 @@ prereg = PreRegistration(
     target_rule="REPLACE", session_filter="REPLACE", direction_filter="REPLACE",
     dev_start="2020-01-01", dev_end="2021-01-01",
     holdout_start="2021-01-01", holdout_end="2022-01-01",
-    min_signal_trades=100, alpha=0.05, min_trades=100,
+    min_signal_trades=100, min_walk_forward_mean_coefficient=0.01,
+    alpha=0.05, min_trades=100,
     min_expectancy=0.0, max_drawdown=100.0,
     falsification_criteria="REPLACE with pre-registered failure conditions",
     registered_before_data=True,
@@ -136,6 +137,8 @@ dev_evidence = DevelopmentEvidence(
     random_entry_p_value=..., observed_mean_r=...,
     random_entry_90th_percentile_r=..., dsr=...,
     bootstrap_90ci_lower=..., signal_trade_count=...,
+    random_entry_repetitions=5000, bootstrap_block_size=5,
+    bootstrap_repetitions=10000, dsr_trials=...,
 )
 
 # Compute HoldoutEvidence from the actual holdout output only. This callback
