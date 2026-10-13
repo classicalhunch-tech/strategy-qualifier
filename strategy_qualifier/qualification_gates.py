@@ -105,6 +105,57 @@ def register_preregistration(preregistration: PreRegistration, path: str | Path)
     return digest
 
 
+_HOLDOUT_EXPOSED_STATUSES = {"DEV_PASSED", "PASS", "RULED_OUT", "INCONCLUSIVE"}
+
+
+def _parse_window(start_value: str, end_value: str) -> tuple[datetime, datetime]:
+    try:
+        start = datetime.fromisoformat(start_value)
+        end = datetime.fromisoformat(end_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("holdout window boundaries must be ISO-8601 dates/timestamps") from exc
+    start_aware = start.tzinfo is not None and start.utcoffset() is not None
+    end_aware = end.tzinfo is not None and end.utcoffset() is not None
+    if start_aware != end_aware:
+        raise ValueError("holdout window boundaries must use consistent timezone awareness")
+    if start_aware:
+        start = start.astimezone(timezone.utc)
+        end = end.astimezone(timezone.utc)
+    if not start < end:
+        raise ValueError("holdout window must have start before end")
+    return start, end
+
+
+def _assert_holdout_window_unexposed(
+    preregistration: PreRegistration, rows: list[dict[str, Any]]
+) -> None:
+    """Prevent same-market holdout reuse where an earlier test exposed the window."""
+    current_id = preregistration.hypothesis_id.strip().casefold()
+    current_market = preregistration.market.strip().casefold()
+    start, end = _parse_window(
+        preregistration.holdout_start, preregistration.holdout_end
+    )
+    for row in rows:
+        other_id = str(row.get("hypothesis_id", "")).strip().casefold()
+        if other_id == current_id:
+            continue
+        if str(row.get("market", "")).strip().casefold() != current_market:
+            continue
+        if row.get("status") not in _HOLDOUT_EXPOSED_STATUSES:
+            continue
+        other_start, other_end = _parse_window(
+            row.get("holdout_start"), row.get("holdout_end")
+        )
+        if (start.tzinfo is None) != (other_start.tzinfo is None):
+            raise ValueError(
+                "cannot verify holdout separation: same-market windows mix timezone-aware and naive timestamps"
+            )
+        if start < other_end and other_start < end:
+            raise ValueError(
+                f"holdout window overlaps previously exposed window for hypothesis {row.get('hypothesis_id')!r}"
+            )
+
+
 def verify_preregistration(preregistration: PreRegistration, path: str | Path) -> str:
     """Require the exact frozen registration to exist and match; never auto-register."""
     payload = _payload(preregistration)
@@ -126,6 +177,7 @@ def verify_preregistration(preregistration: PreRegistration, path: str | Path) -
             f"hypothesis is already in terminal/active state {row.get('status')!r}; "
             "do not rerun it under the same hypothesis ID"
         )
+    _assert_holdout_window_unexposed(preregistration, rows)
     return digest
 
 
