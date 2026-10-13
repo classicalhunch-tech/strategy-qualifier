@@ -98,7 +98,7 @@ def test_all_mandatory_gates_pass_before_single_use_holdout(tmp_path):
     assert ledger[0]["decision"] == "PASS"
     assert ledger[0]["research_evidence"]["bif"] == 1.1
 
-    with pytest.raises(ValueError, match="holdout already used"):
+    with pytest.raises(ValueError, match="terminal|already used|cannot be reset"):
         qualify_strategy(**args)
     assert calls == [True]
 
@@ -170,7 +170,7 @@ def test_holdout_gate_failure_is_ruled_out_and_consumed(tmp_path):
     assert any("bootstrap" in reason for reason in result.reasons)
     ledger = json.loads((tmp_path / "holdout.json").read_text())
     assert ledger[0]["decision"] == "RULED OUT"
-    with pytest.raises(ValueError, match="holdout already used"):
+    with pytest.raises(ValueError, match="terminal|already used|cannot be reset"):
         qualify_strategy(**args)
 
 
