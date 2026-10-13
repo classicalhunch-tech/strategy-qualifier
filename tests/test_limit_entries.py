@@ -16,12 +16,12 @@ def test_limit_entry_waits_for_touch_and_uses_planned_price():
     ])
     trade = run_backtest(
         bars,
-        [Signal(0, 1, 97, 105, "limit-demo", entry_price=100, entry_expiry_bars=3)],
+        [Signal(0, 1, 97, 105, "limit-demo", entry_price=99, entry_expiry_bars=3)],
     )[0]
     assert trade.entry_bar == 2
-    assert trade.entry_price == 100
+    assert trade.entry_price == 99
     assert trade.exit_reason == "TARGET"
-    assert trade.net_pnl == 5
+    assert trade.net_pnl == 6
 
 
 def test_limit_entry_expires_without_a_fill():
