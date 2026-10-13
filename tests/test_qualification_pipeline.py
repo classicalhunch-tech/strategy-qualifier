@@ -119,7 +119,7 @@ def test_development_dsr_evidence_must_match_recomputed_trades(tmp_path):
     bad = DevelopmentEvidence(**{**bad.__dict__, "dsr": 0.95})
     result = qualify_strategy(**run_args(tmp_path, dev_evidence=bad))
     assert result.stage == "development"
-    assert result.decision != "PASS"
+    assert result.decision == "INCONCLUSIVE"
     assert any("does not match the recomputed DSR" in reason for reason in result.reasons)
     assert not (tmp_path / "holdout.json").exists()
 
@@ -131,14 +131,14 @@ def test_holdout_dsr_evidence_must_match_recomputed_trades(tmp_path):
         tmp_path, runner=lambda: (trades(40), bad),
     ))
     assert result.stage == "holdout"
-    assert result.decision == "RULED OUT"
+    assert result.decision == "INCONCLUSIVE"
     assert any("does not match the recomputed DSR" in reason for reason in result.reasons)
 
 
 def test_dsr_evidence_outside_probability_range_is_rejected(tmp_path):
     bad = DevelopmentEvidence(**{**evidence().__dict__, "dsr": 1.2})
     result = qualify_strategy(**run_args(tmp_path, dev_evidence=bad))
-    assert result.decision != "PASS"
+    assert result.decision == "INCONCLUSIVE"
     assert any("within [0, 1]" in reason for reason in result.reasons)
 
 def test_any_development_gate_failure_prevents_holdout(tmp_path):
