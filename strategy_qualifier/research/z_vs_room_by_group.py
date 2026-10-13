@@ -42,8 +42,6 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 from strategy_qualifier.research import exit_study as es  # noqa: E402
 from strategy_qualifier.research import z_vs_room as zr  # noqa: E402

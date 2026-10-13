@@ -82,6 +82,142 @@ pd.DataFrame([trade.__dict__ for trade in trades]).to_csv("trade_ledger.csv", in
 
 Signals are generated from past/current bars only. The last bar is not queried because it has no next bar for entry. Set `entry_price=...` on a `Signal` to model a resting limit/retest entry; `entry_expiry_bars` controls how long it waits. The engine is an OHLC research simulator, not a tick-accurate fill model.
 
+
+## Automatic end-to-end qualification (recommended)
+
+Use `qualify_bars_automatic()` to have the qualifier run its own research utilities rather than accepting caller-entered statistics. It computes the five-fold purged/embargoed walk-forward evidence, cluster-robust session comparison, 5,000-repetition stratified random-entry baseline, ledger-counted DSR, and 90% moving-block-bootstrap lower bound. Only after development passes and the single-use holdout is reserved does it compute holdout DSR, bootstrap, BIF and (when applicable) variant rank stability.
+
+The one strategy-specific input is a **candidate-pool builder**. Random-entry testing is only meaningful if the pool contains all eligible alternative entries with the same direction, exit, stop/target and transaction-cost assumptions as the tested strategy. The qualifier deliberately refuses to invent that pool. The builder receives development bars only and must return a DataFrame with `entry_time`, `direction`, `net_r`, and `is_signal` columns. `net_r` must be net of the same costs used by the backtest.
+
+```python
+from strategy_qualifier.qualification import QualificationCriteria
+from strategy_qualifier.qualification_data import qualify_bars_automatic
+
+# preregistration must already be registered and frozen before this call.
+# candidate_pool_builder(dev_bars, dev_trades) must generate ALL eligible
+# alternative entries using the same execution/cost model; do not use only
+# trades selected by the signal.
+result = qualify_bars_automatic(
+    bars=bars,
+    strategy=my_strategy,
+    split_index=split_index,  # fixed before inspecting results
+    preregistration=prereg,
+    preregistration_path="research/preregistration.json",
+    candidate_pool_builder=candidate_pool_builder,
+    criteria=QualificationCriteria(
+        min_trades=prereg.min_trades,
+        min_expectancy=prereg.min_expectancy,
+        max_drawdown=prereg.max_drawdown,
+    ),
+    dev_ledger_path="research/ledger.csv",
+    holdout_ledger_path="research/holdout-ledger.json",
+    code_version="frozen-git-commit",
+    data_version="dataset-checksum-or-version",
+    config=BacktestConfig(spread=0.2, slippage_per_side=0.05),
+)
+print(result.decision, result.reasons)
+```
+
+For a multi-variant study, provide the pre-registered `variants_tested` count and aligned development/holdout score arrays so the IS/OOS rank-stability gate can run. Do not include unregistered variants after seeing holdout results. A PASS means the configured research gates passed; it does not guarantee future profitability or replace forward paper-trading validation.
+
+The older `qualify_bars()` API remains available for externally computed evidence, but it is less automatic and should only be used when those values are independently reproducible. Do not manually guess or hardcode evidence.
+
+## Development/holdout qualification pipeline
+
+The generic OHLC path runs a strict research qualification. It requires a frozen pre-registration record, a complete development-evidence bundle, a complete holdout-evidence bundle, and passing base performance gates. Missing evidence fails closed. The split is positional and chronological: `split_index` is the first holdout candle. The strategy sees only history available through each candle close; earlier candles remain available as holdout warm-up context, while pre-split signals are excluded from holdout trades. The holdout callback is reserved single-use before execution.
+
+```python
+import pandas as pd
+from strategy_qualifier.backtest import BacktestConfig, Signal
+from strategy_qualifier.qualification import QualificationCriteria
+from strategy_qualifier.qualification_data import qualify_bars
+from strategy_qualifier.qualification_gates import (
+    PreRegistration, DevelopmentEvidence, HoldoutEvidence,
+    register_preregistration,
+)
+
+bars = pd.read_csv("your_ohlc.csv", parse_dates=["timestamp"])
+# Sort oldest-to-newest and freeze the strategy before testing.
+
+def my_strategy(history: pd.DataFrame):
+    i = len(history) - 1
+    # Replace with your frozen, causal strategy rules.
+    if i >= 1 and history.close.iloc[i] > history.close.iloc[i - 1]:
+        close = float(history.close.iloc[i])
+        return Signal(bar_index=i, side=1, stop_loss=close - 2,
+                      take_profit=close + 4, hypothesis_id="my-strategy-v1")
+    return None
+
+my_strategy.hypothesis_id = "my-strategy-v1"
+
+# Fill every field from your actual, frozen pre-registration document.
+prereg = PreRegistration(
+    hypothesis_id="my-strategy-v1",
+    question="REPLACE with one specific test question",
+    hypothesis="REPLACE with directional hypothesis",
+    expected_sign="positive", market="REPLACE", timeframe="REPLACE",
+    entry_rules="REPLACE", exit_rules="REPLACE", stop_rule="REPLACE",
+    target_rule="REPLACE", session_filter="REPLACE", direction_filter="REPLACE",
+    dev_start="2020-01-01", dev_end="2021-01-01",
+    holdout_start="2021-01-01", holdout_end="2022-01-01",
+    min_signal_trades=100, min_walk_forward_mean_coefficient=0.01,
+    alpha=0.05, min_trades=100,
+    min_expectancy=0.0, max_drawdown=100.0,
+    falsification_criteria="REPLACE with pre-registered failure conditions",
+    registered_before_data=True,
+)
+register_preregistration(prereg, "research/preregistration.json")
+
+# IMPORTANT: compute these values from development trade/pool data with the
+# research utilities. Do not copy example numbers or manually guess evidence.
+dev_evidence = DevelopmentEvidence(
+    walk_forward_coefficients=(...), session_coefficient=...,
+    session_cluster_robust_se=..., session_p_value=...,
+    random_entry_p_value=..., observed_mean_r=...,
+    random_entry_90th_percentile_r=..., dsr=...,
+    bootstrap_90ci_lower=..., signal_trade_count=...,
+    random_entry_repetitions=5000, bootstrap_block_size=5,
+    bootstrap_repetitions=10000, dsr_trials=...,
+)
+
+# Compute HoldoutEvidence from the actual holdout output only. This callback
+# runs only after all development gates pass and the holdout is reserved.
+def holdout_evidence_builder(holdout_trades, holdout_bars):
+    return HoldoutEvidence(
+        bif=..., dev_mean_r=..., holdout_mean_r=...,
+        bootstrap_90ci_lower=..., dsr=...,
+        # Include these only when multiple variants were tested:
+        variants_tested=1,
+    )
+
+result = qualify_bars(
+    bars=bars, strategy=my_strategy, split_index=int(len(bars) * 0.7),
+    preregistration=prereg,
+    preregistration_path="research/preregistration.json",
+    development_evidence=dev_evidence,
+    holdout_evidence_builder=holdout_evidence_builder,
+    criteria=QualificationCriteria(
+        min_trades=prereg.min_trades,
+        min_expectancy=prereg.min_expectancy,
+        max_drawdown=prereg.max_drawdown,
+    ),
+    dev_ledger_path="research/dev_ledger.csv",
+    holdout_ledger_path="research/holdout_ledger.json",
+    code_version="your-frozen-commit",
+    data_version="symbol-timeframe-provider-dataset-version",
+    config=BacktestConfig(spread=0.2, slippage_per_side=0.05),
+)
+print(result.decision, result.reasons)
+```
+
+The criteria above are an example only, not recommended trading thresholds. Use a
+unique, stable `hypothesis_id` for each materially different strategy variant.
+Keep the holdout ledger and do not reset it to retry a hypothesis. The ledger is a
+local research guardrail, not a tamper-proof security boundary. This synthetic/CI
+integration proves the pipeline wiring and decision flow; real-market performance
+still requires your versioned OHLC data, frozen strategy rules, and justified
+costs and thresholds.
+
 ## Quick start
 
 Python 3.11 is the initial target.
@@ -99,3 +235,54 @@ pytest
 Selected code is being adapted from [classicalhunch-tech/A-stratergy-fork](https://github.com/classicalhunch-tech/A-stratergy-fork). The original repository is kept separate and is not modified by this project. Review the source repository's license before redistributing or reusing its code.
 
 See [docs/architecture.md](docs/architecture.md) and [docs/research_protocol.md](docs/research_protocol.md).
+
+
+## Mandatory qualification gates (strict mode)
+
+A strategy cannot receive `PASS` unless all applicable gates below pass. The
+strict API requires a frozen `PreRegistration`, `DevelopmentEvidence`, and a
+`HoldoutEvidence` returned by the holdout evidence builder. The evidence must be
+computed from the matching development/holdout trade ledger using the research
+utilities; the gate objects are not a substitute for running those analyses.
+
+**Before any test:** register a complete pre-registration once using
+`register_preregistration(preregistration, "research/preregistration.json")`.
+The record freezes the hypothesis, exact setup and exit rules, dev/holdout windows,
+N*, alpha, base thresholds and falsification criteria. A later registration with
+the same hypothesis ID is refused, and the qualification API verifies the record
+hash before running.
+
+**Development gates — every item is mandatory:**
+
+- Walk-forward: at least three finite folds, a majority positive, fewer than two negative folds, and a positive mean coefficient.
+- Session-vs-outside: positive session coefficient, valid cluster-robust standard error, and p-value `<= alpha`.
+- Random-entry baseline: p-value `<= alpha` and observed mean R strictly above the random-entry 90th percentile.
+- Deflated Sharpe Ratio strictly `> 0.90`, calculated using the development trial ledger.
+- Moving block-bootstrap 90% confidence interval lower bound strictly `> 0`.
+- N*: observed signal-trade count must be at least the frozen pre-registered minimum.
+- Base trade-count, expectancy, and drawdown criteria must also pass.
+
+If any development gate fails, the holdout callback is not called. A result with
+insufficient data is `INCONCLUSIVE`; a sufficiently sampled failed hypothesis is
+`RULED OUT`.
+
+**Holdout gates — every item is mandatory:**
+
+- Backtest Inflation Factor strictly between `0.5` and `1.5`, with no sign flip.
+- If multiple variants were tested, Spearman rank correlation strictly `> 0.5` and the in-sample winner's out-of-sample percentile strictly `> 0.5`.
+- Moving block-bootstrap 90% confidence interval lower bound strictly `> 0`.
+- Holdout DSR strictly `> 0.90`, using the same development trial count.
+- Base trade-count, expectancy, and drawdown criteria must also pass.
+
+A holdout attempt is recorded before the callback runs. Errors still consume the
+attempt. Do not reset the holdout ledger, lower N*, adjust thresholds after seeing
+results, or reuse the holdout for a changed strategy. Any strategy change is a new
+hypothesis ID. The ledgers are local research guardrails, not tamper-proof security
+boundaries. These statistical gates provide evidence, not a guarantee of future
+profitability.
+
+The strict API is explicit about research evidence so an operator can review the
+underlying calculations. Compute the walk-forward, cluster-robust session test,
+5,000-rep random-entry baseline, DSR, bootstrap, BIF and rank stability from the
+versioned trade/pool data, then pass their measured values to the evidence objects.
+A hand-entered or fabricated evidence bundle is not a valid research result.
