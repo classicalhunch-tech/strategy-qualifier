@@ -9,6 +9,7 @@ from strategy_qualifier.qualification_data import qualify_bars
 from strategy_qualifier.qualification_gates import (
     DevelopmentEvidence, HoldoutEvidence, PreRegistration, register_preregistration,
 )
+from strategy_qualifier.research.deflated_sharpe import deflated_sharpe
 
 
 def prereg(hypothesis_id="H-001"):
@@ -29,13 +30,18 @@ def prereg(hypothesis_id="H-001"):
     )
 
 
+def expected_dsr(n=40, n_trials=1):
+    returns = [1.6 + (i % 2) * 0.2 for i in range(n)]
+    return float(deflated_sharpe(returns, n_trials=n_trials)["dsr"])
+
+
 def evidence(n=40):
     return DevelopmentEvidence(
         walk_forward_coefficients=(0.2, 0.3, 0.25, 0.15, 0.22),
         session_coefficient=0.2, session_cluster_robust_se=0.05,
         session_p_value=0.01, random_entry_p_value=0.01,
-        observed_mean_r=1.8, random_entry_90th_percentile_r=0.5,
-        dsr=0.99, bootstrap_90ci_lower=0.8, signal_trade_count=n,
+        observed_mean_r=1.7, random_entry_90th_percentile_r=0.5,
+        dsr=expected_dsr(n), bootstrap_90ci_lower=0.8, signal_trade_count=n,
         random_entry_repetitions=5000, bootstrap_block_size=5,
         bootstrap_repetitions=10000, dsr_trials=1,
     )
@@ -43,8 +49,8 @@ def evidence(n=40):
 
 def holdout_evidence():
     return HoldoutEvidence(
-        bif=1.1, dev_mean_r=1.8, holdout_mean_r=1.6,
-        bootstrap_90ci_lower=0.4, dsr=0.99,
+        bif=1.1, dev_mean_r=1.7, holdout_mean_r=1.7,
+        bootstrap_90ci_lower=0.4, dsr=expected_dsr(),
     )
 
 
@@ -105,14 +111,43 @@ def test_all_mandatory_gates_pass_before_single_use_holdout(tmp_path):
     assert calls == [True]
 
 
+
+
+def test_development_dsr_evidence_must_match_recomputed_trades(tmp_path):
+    bad = evidence()
+    bad = DevelopmentEvidence(**{**bad.__dict__, "dsr": 0.95})
+    result = qualify_strategy(**run_args(tmp_path, dev_evidence=bad))
+    assert result.stage == "development"
+    assert result.decision != "PASS"
+    assert any("does not match the recomputed DSR" in reason for reason in result.reasons)
+    assert not (tmp_path / "holdout.json").exists()
+
+
+def test_holdout_dsr_evidence_must_match_recomputed_trades(tmp_path):
+    good = holdout_evidence()
+    bad = HoldoutEvidence(**{**good.__dict__, "dsr": 0.95})
+    result = qualify_strategy(**run_args(
+        tmp_path, runner=lambda: (trades(40), bad),
+    ))
+    assert result.stage == "holdout"
+    assert result.decision == "RULED OUT"
+    assert any("does not match the recomputed DSR" in reason for reason in result.reasons)
+
+
+def test_dsr_evidence_outside_probability_range_is_rejected(tmp_path):
+    bad = DevelopmentEvidence(**{**evidence().__dict__, "dsr": 1.2})
+    result = qualify_strategy(**run_args(tmp_path, dev_evidence=bad))
+    assert result.decision != "PASS"
+    assert any("within [0, 1]" in reason for reason in result.reasons)
+
 def test_any_development_gate_failure_prevents_holdout(tmp_path):
     calls = []
     bad = DevelopmentEvidence(
         walk_forward_coefficients=(0.2, -0.3, -0.1, 0.15, 0.22),
         session_coefficient=0.2, session_cluster_robust_se=0.05,
         session_p_value=0.01, random_entry_p_value=0.01,
-        observed_mean_r=1.8, random_entry_90th_percentile_r=0.5,
-        dsr=0.99, bootstrap_90ci_lower=-0.1, signal_trade_count=40,
+        observed_mean_r=1.7, random_entry_90th_percentile_r=0.5,
+        dsr=expected_dsr(), bootstrap_90ci_lower=-0.1, signal_trade_count=40,
         random_entry_repetitions=5000, bootstrap_block_size=5,
         bootstrap_repetitions=10000, dsr_trials=1,
     )
@@ -163,7 +198,7 @@ def test_preregistration_is_frozen_and_cannot_be_overwritten(tmp_path):
 
 def test_holdout_gate_failure_is_ruled_out_and_consumed(tmp_path):
     bad_holdout = HoldoutEvidence(
-        bif=2.1, dev_mean_r=1.8, holdout_mean_r=-0.1,
+        bif=2.1, dev_mean_r=1.7, holdout_mean_r=-0.1,
         bootstrap_90ci_lower=-0.5, dsr=0.7,
     )
     args = run_args(tmp_path, runner=lambda: (trades(40), bad_holdout))
