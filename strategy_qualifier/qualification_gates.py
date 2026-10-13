@@ -209,6 +209,8 @@ class DevelopmentEvidence:
             fail.append(f"random-entry baseline: p-value must be <= alpha ({prereg.alpha})")
         if self.observed_mean_r <= self.random_entry_90th_percentile_r:
             fail.append("random-entry baseline: observed mean R is not above the random 90th percentile")
+        if not 0.0 <= self.dsr <= 1.0:
+            fail.append("development DSR must be within [0, 1]")
         if not self.dsr > 0.90:
             fail.append("development DSR must be > 0.90")
         if not self.bootstrap_90ci_lower > 0:
@@ -257,6 +259,8 @@ class HoldoutEvidence:
             fail.append("holdout block bootstrap must use block size 5 and at least 1000 repetitions")
         if self.dsr_trials != expected_trials:
             fail.append(f"holdout DSR trial count {self.dsr_trials} does not match development ledger count {expected_trials}")
+        if not 0.0 <= self.dsr <= 1.0:
+            fail.append("holdout DSR must be within [0, 1]")
         if not self.dsr > 0.90:
             fail.append("holdout DSR must be > 0.90 using the same dev trial count")
         if self.variants_tested > 1:
