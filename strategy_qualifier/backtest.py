@@ -21,12 +21,18 @@ class Signal:
     stop_loss: float
     take_profit: float
     hypothesis_id: str = ""
+    entry_price: float | None = None  # None = next-bar market; value = resting limit
+    entry_expiry_bars: int = 20
 
     def validate(self, n_bars: int) -> None:
         if self.side not in (-1, 1):
             raise ValueError("signal side must be +1 (long) or -1 (short)")
         if not math.isfinite(self.stop_loss) or not math.isfinite(self.take_profit):
             raise ValueError("stop_loss and take_profit must be finite")
+        if self.entry_price is not None and not math.isfinite(self.entry_price):
+            raise ValueError("entry_price must be finite when specified")
+        if self.entry_expiry_bars < 1:
+            raise ValueError("entry_expiry_bars must be >= 1")
         if not 0 <= self.bar_index < n_bars - 1:
             raise ValueError("signal bar_index must have a following entry bar")
         if self.side == 1 and not self.stop_loss < self.take_profit:
@@ -79,10 +85,11 @@ def run_backtest(
 ) -> list[Trade]:
     """Run non-overlapping trades against OHLC bars.
 
-    Entry is next-bar open. If stop and target both touch within one bar, stop
-    wins (conservative ambiguity handling). Gap-through stops fill at the open;
-    targets fill at their target price. Spread/slippage are charged on each side,
-    and commission is charged per unit on each side. PnL is per one unit.
+    By default, entry is next-bar open. If Signal.entry_price is specified, a
+    limit order waits for that price to be touched within entry_expiry_bars.
+    If stop and target both touch within one bar, stop wins. Gap-through stops
+    fill at the open; targets fill at their target price. Costs are per side;
+    PnL is per one unit.
     """
     cfg = config or BacktestConfig()
     cfg.validate()
@@ -116,11 +123,34 @@ def run_backtest(
     next_available_bar = 0
 
     for signal in prepared:
-        entry_bar = signal.bar_index + 1
-        if entry_bar < next_available_bar:
+        first_bar = max(signal.bar_index + 1, next_available_bar)
+        if first_bar >= len(frame):
             continue
-        entry_open = float(frame.iloc[entry_bar]["open"])
-        entry_price = entry_open + signal.side * half_cost
+        entry_bar = first_bar
+        if signal.entry_price is None:
+            entry_open = float(frame.iloc[entry_bar]["open"])
+            raw_entry = entry_open
+        else:
+            last_entry_bar = min(
+                len(frame) - 1,
+                signal.bar_index + signal.entry_expiry_bars,
+            )
+            found = None
+            for j in range(first_bar, last_entry_bar + 1):
+                bar = frame.iloc[j]
+                level = signal.entry_price
+                if float(bar["low"]) <= level <= float(bar["high"]):
+                    # A gap through a limit gets the open when that is more
+                    # favorable; otherwise the resting order fills at its level.
+                    o = float(bar["open"])
+                    found = (j, min(o, level) if signal.side == 1 else max(o, level))
+                    break
+            if found is None:
+                continue
+            entry_bar, raw_entry = found
+            entry_open = raw_entry
+
+        entry_price = raw_entry + signal.side * half_cost
         if signal.side == 1 and not signal.stop_loss < entry_price < signal.take_profit:
             continue
         if signal.side == -1 and not signal.take_profit < entry_price < signal.stop_loss:
@@ -158,7 +188,7 @@ def run_backtest(
                     break
 
         exit_price = raw_exit - signal.side * half_cost
-        gross = signal.side * (raw_exit - entry_open)
+        gross = signal.side * (raw_exit - raw_entry)
         costs = 2.0 * half_cost + 2.0 * commission
         net = signal.side * (exit_price - entry_price) - 2.0 * commission
         trades.append(Trade(
