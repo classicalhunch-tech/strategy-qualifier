@@ -82,6 +82,66 @@ pd.DataFrame([trade.__dict__ for trade in trades]).to_csv("trade_ledger.csv", in
 
 Signals are generated from past/current bars only. The last bar is not queried because it has no next bar for entry. Set `entry_price=...` on a `Signal` to model a resting limit/retest entry; `entry_expiry_bars` controls how long it waits. The engine is an OHLC research simulator, not a tick-accurate fill model.
 
+
+## Development/holdout qualification pipeline
+
+The generic OHLC path can also run a complete research qualification: it backtests
+the development segment, applies caller-supplied gates, and evaluates the frozen
+strategy on the holdout segment only if development passes. The split is positional
+and chronological: `split_index` is the first holdout candle. The strategy sees
+only history available through each candle close; earlier candles remain available
+as holdout warm-up context, while pre-split signals are excluded from holdout
+trades.
+
+```python
+import pandas as pd
+from strategy_qualifier.backtest import BacktestConfig, Signal
+from strategy_qualifier.qualification import QualificationCriteria
+from strategy_qualifier.qualification_data import qualify_bars
+
+bars = pd.read_csv("your_ohlc.csv", parse_dates=["timestamp"])
+# Ensure rows are sorted oldest-to-newest before choosing the split.
+
+def my_strategy(history: pd.DataFrame):
+    i = len(history) - 1
+    # Replace this example condition with your frozen strategy rules.
+    if i >= 1 and history.close.iloc[i] > history.close.iloc[i - 1]:
+        close = float(history.close.iloc[i])
+        return Signal(
+            bar_index=i, side=1, stop_loss=close - 2.0,
+            take_profit=close + 4.0, hypothesis_id="my-strategy-v1",
+        )
+    return None
+
+my_strategy.hypothesis_id = "my-strategy-v1"
+
+result = qualify_bars(
+    bars=bars,
+    strategy=my_strategy,
+    split_index=int(len(bars) * 0.7),  # first 70% development, remaining holdout
+    criteria=QualificationCriteria(
+        min_trades=30,
+        min_expectancy=0.0,
+        max_drawdown=100.0,
+        # Set min_dsr only if you have chosen and justified a threshold.
+    ),
+    dev_ledger_path="research/dev_ledger.csv",
+    holdout_ledger_path="research/holdout_ledger.json",
+    code_version="your-frozen-commit-or-version",
+    data_version="symbol-timeframe-provider-and-dataset-version",
+    config=BacktestConfig(spread=0.2, slippage_per_side=0.05),
+)
+print(result.decision, result.metrics, result.holdout_metrics)
+```
+
+The criteria above are an example only, not recommended trading thresholds. Use a
+unique, stable `hypothesis_id` for each materially different strategy variant.
+Keep the holdout ledger and do not reset it to retry a hypothesis. The ledger is a
+local research guardrail, not a tamper-proof security boundary. This synthetic/CI
+integration proves the pipeline wiring and decision flow; real-market performance
+still requires your versioned OHLC data, frozen strategy rules, and justified
+costs and thresholds.
+
 ## Quick start
 
 Python 3.11 is the initial target.
