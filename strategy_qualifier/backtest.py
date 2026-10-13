@@ -123,7 +123,9 @@ def run_backtest(
     next_available_bar = 0
 
     for signal in prepared:
-        first_bar = max(signal.bar_index + 1, next_available_bar)
+        if signal.bar_index + 1 < next_available_bar:
+            continue
+        first_bar = signal.bar_index + 1
         if first_bar >= len(frame):
             continue
         entry_bar = first_bar
