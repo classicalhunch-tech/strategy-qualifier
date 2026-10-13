@@ -58,7 +58,7 @@ print(summarize_trades(trades))
 pd.DataFrame([trade.__dict__ for trade in trades]).to_csv("trade_ledger.csv", index=False)
 ```
 
-Signals are generated from past/current bars only. The last bar is not queried because it has no next bar for entry. The engine is an OHLC research simulator, not a tick-accurate fill model.
+Signals are generated from past/current bars only. The last bar is not queried because it has no next bar for entry. Set `entry_price=...` on a `Signal` to model a resting limit/retest entry; `entry_expiry_bars` controls how long it waits. The engine is an OHLC research simulator, not a tick-accurate fill model.
 
 ## Quick start
 
