@@ -22,7 +22,7 @@ def prereg(hypothesis_id="H-001"):
         target_rule="Ten units.", session_filter="All sessions.",
         direction_filter="Long only.", dev_start="2020-01-01",
         dev_end="2021-01-01", holdout_start="2021-01-01",
-        holdout_end="2022-01-01", min_signal_trades=30, alpha=0.05,
+        holdout_end="2022-01-01", min_signal_trades=30, min_walk_forward_mean_coefficient=0.01, alpha=0.05,
         min_trades=20, min_expectancy=0.0, max_drawdown=1000.0,
         falsification_criteria="Any mandatory gate fails.",
         registered_before_data=True,
@@ -35,7 +35,7 @@ def evidence(n=40):
         session_coefficient=0.2, session_cluster_robust_se=0.05,
         session_p_value=0.01, random_entry_p_value=0.01,
         observed_mean_r=1.8, random_entry_90th_percentile_r=0.5,
-        dsr=0.99, bootstrap_90ci_lower=0.8, signal_trade_count=n,
+        dsr=0.99, bootstrap_90ci_lower=0.8, signal_trade_count=n,\n        random_entry_repetitions=5000, bootstrap_block_size=5,\n        bootstrap_repetitions=10000, dsr_trials=1,
     )
 
 
