@@ -12,7 +12,7 @@ from strategy_qualifier.qualification import (
     QualificationCriteria, QualificationResult, qualify_strategy,
 )
 from strategy_qualifier.qualification_gates import (
-    DevelopmentEvidence, HoldoutEvidence, PreRegistration,
+    DevelopmentEvidence, HoldoutEvidence, PreRegistration, verify_preregistration,
 )
 
 
@@ -41,6 +41,19 @@ def _validate_inputs(bars: pd.DataFrame, strategy: Callable, split_index: int) -
     if bars.empty:
         raise ValueError("bars must not be empty")
     _validate_chronology(bars)
+
+
+def _validate_preregistration(preregistration: PreRegistration, path: str | Path,
+                              criteria: QualificationCriteria, strategy: Callable) -> None:
+    # Verify the frozen record before inspecting bars or invoking strategy code.
+    verify_preregistration(preregistration, path)
+    if _hypothesis_id(strategy).casefold() != preregistration.hypothesis_id.strip().casefold():
+        raise ValueError("strategy hypothesis ID must match frozen pre-registration")
+    criteria.validate()
+    if criteria.min_trades != preregistration.min_trades:
+        raise ValueError("qualification min_trades must exactly match frozen pre-registration")
+    if criteria.min_expectancy != preregistration.min_expectancy or criteria.max_drawdown != preregistration.max_drawdown:
+        raise ValueError("qualification criteria differ from frozen pre-registration")
 
 
 def _hypothesis_id(strategy: Callable) -> str:
@@ -97,6 +110,7 @@ def qualify_bars(
 
     Prefer qualify_bars_automatic() for the integrated, research-tool-backed path.
     """
+    _validate_preregistration(preregistration, preregistration_path, criteria, strategy)
     _validate_inputs(bars, strategy, split_index)
     if not callable(holdout_evidence_builder):
         raise TypeError("holdout_evidence_builder must be callable")
@@ -153,6 +167,7 @@ def qualify_bars_automatic(
     receives development bars only. No holdout statistics are calculated until
     the mandatory development gates pass and the single-use holdout is reserved.
     """
+    _validate_preregistration(preregistration, preregistration_path, criteria, strategy)
     _validate_inputs(bars, strategy, split_index)
     if not callable(candidate_pool_builder):
         raise TypeError("candidate_pool_builder is required; it must build all eligible alternatives")
