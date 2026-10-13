@@ -211,11 +211,17 @@ def test_preregistration_is_frozen_and_cannot_be_overwritten(tmp_path):
 
 
 def test_holdout_gate_failure_is_ruled_out_and_consumed(tmp_path):
+    losing_trades = [
+        trade(-8.0 - (i % 2), -1.6 - (i % 2) * 0.2)
+        for i in range(40)
+    ]
+    losing_returns = [-1.6 - (i % 2) * 0.2 for i in range(40)]
     bad_holdout = HoldoutEvidence(
-        bif=2.1, dev_mean_r=1.7, holdout_mean_r=-0.1,
-        bootstrap_90ci_lower=-0.5, dsr=0.7,
+        bif=2.1, dev_mean_r=1.7, holdout_mean_r=-1.7,
+        bootstrap_90ci_lower=-0.5,
+        dsr=float(deflated_sharpe(losing_returns, n_trials=1)["dsr"]),
     )
-    args = run_args(tmp_path, runner=lambda: (trades(40), bad_holdout))
+    args = run_args(tmp_path, runner=lambda: (losing_trades, bad_holdout))
     result = qualify_strategy(**args)
     assert result.decision == "RULED OUT"
     assert any("BIF" in reason for reason in result.reasons)
