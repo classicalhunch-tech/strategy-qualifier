@@ -8,6 +8,7 @@ from strategy_qualifier.qualification import QualificationCriteria, qualify_stra
 from strategy_qualifier.qualification_data import qualify_bars
 from strategy_qualifier.qualification_gates import (
     DevelopmentEvidence, HoldoutEvidence, PreRegistration, register_preregistration,
+    mark_preregistration_status, verify_preregistration,
 )
 from strategy_qualifier.research.deflated_sharpe import deflated_sharpe
 
@@ -182,6 +183,19 @@ def test_missing_preregistration_fails_closed(tmp_path):
     with pytest.raises(ValueError, match="pre-registration ledger missing"):
         qualify_strategy(**args)
 
+
+
+
+def test_overlapping_previously_exposed_holdout_window_is_rejected(tmp_path):
+    path = tmp_path / "prereg.json"
+    first = prereg("H-001")
+    register_preregistration(first, path)
+    mark_preregistration_status(str(path), "H-001", "PASS", {"decision": "PASS"})
+
+    second = prereg("H-002")
+    register_preregistration(second, path)
+    with pytest.raises(ValueError, match="overlaps previously exposed window"):
+        verify_preregistration(second, path)
 
 def test_preregistration_is_frozen_and_cannot_be_overwritten(tmp_path):
     p = prereg()
