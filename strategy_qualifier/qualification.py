@@ -133,23 +133,26 @@ def qualify_strategy(
     dev_dsr = float(dev_dsr_result["dsr"])
     dev_failures = _failed_gates(dev_summary, criteria, dev_dsr if math.isfinite(dev_dsr) else None)
     dev_failures.extend(development_evidence.failures(preregistration, trials))
+    dev_integrity_problems: list[str] = []
     if development_evidence.signal_trade_count != dev_summary["trade_count"]:
-        dev_failures.append(
-            "development evidence signal_trade_count does not match the actual development trades"
-        )
+        problem = "development evidence signal_trade_count does not match the actual development trades"
+        dev_failures.append(problem)
+        dev_integrity_problems.append(problem)
     actual_dev_mean_r = float(np.mean(dev_returns)) if dev_returns else float("nan")
     if (not math.isfinite(development_evidence.observed_mean_r)
             or not _close(development_evidence.observed_mean_r, actual_dev_mean_r)):
-        dev_failures.append(
-            "development evidence observed_mean_r does not match the actual development trade returns"
-        )
+        problem = "development evidence observed_mean_r does not match the actual development trade returns"
+        dev_failures.append(problem)
+        dev_integrity_problems.append(problem)
     if (not math.isfinite(development_evidence.dsr)
             or not 0.0 <= development_evidence.dsr <= 1.0):
-        dev_failures.append("development evidence DSR must be finite and within [0, 1]")
+        problem = "development evidence DSR must be finite and within [0, 1]"
+        dev_failures.append(problem)
+        dev_integrity_problems.append(problem)
     elif math.isfinite(dev_dsr) and not _close(development_evidence.dsr, dev_dsr):
-        dev_failures.append(
-            "development evidence DSR does not match the recomputed DSR from development trades"
-        )
+        problem = "development evidence DSR does not match the recomputed DSR from development trades"
+        dev_failures.append(problem)
+        dev_integrity_problems.append(problem)
     if dev_summary["trade_count"] < preregistration.min_trades:
         dev_failures.append(
             f"minimum dev trades not met: {dev_summary['trade_count']} < {preregistration.min_trades}"
@@ -164,7 +167,10 @@ def qualify_strategy(
     )
     if dev_failures:
         enough_data = dev_summary["trade_count"] >= max(criteria.min_trades, preregistration.min_signal_trades)
-        decision = "RULED OUT" if enough_data else "INCONCLUSIVE"
+        decision = (
+            "INCONCLUSIVE" if dev_integrity_problems
+            else ("RULED OUT" if enough_data else "INCONCLUSIVE")
+        )
         status = "DEV_RULED_OUT" if decision == "RULED OUT" else "DEV_INCONCLUSIVE"
         mark_preregistration_status(str(preregistration_path), hypothesis_id, status, {
             "decision": decision, "stage": "development", "reasons": dev_failures,
@@ -204,28 +210,34 @@ def qualify_strategy(
             holdout_dsr if math.isfinite(holdout_dsr) else None,
         )
         holdout_failures.extend(holdout_evidence.failures(trials))
+        holdout_integrity_problems: list[str] = []
         actual_holdout_mean_r = float(np.mean(holdout_returns)) if holdout_returns else float("nan")
         actual_dev_mean_r = float(np.mean(dev_returns)) if dev_returns else float("nan")
         if (not math.isfinite(holdout_evidence.dev_mean_r)
                 or not _close(holdout_evidence.dev_mean_r, actual_dev_mean_r)):
-            holdout_failures.append(
-                "holdout evidence dev_mean_r does not match the actual development trade returns"
-            )
+            problem = "holdout evidence dev_mean_r does not match the actual development trade returns"
+            holdout_failures.append(problem)
+            holdout_integrity_problems.append(problem)
         if (not math.isfinite(holdout_evidence.holdout_mean_r)
                 or not _close(holdout_evidence.holdout_mean_r, actual_holdout_mean_r)):
-            holdout_failures.append(
-                "holdout evidence holdout_mean_r does not match the actual holdout trade returns"
-            )
+            problem = "holdout evidence holdout_mean_r does not match the actual holdout trade returns"
+            holdout_failures.append(problem)
+            holdout_integrity_problems.append(problem)
         if (not math.isfinite(holdout_evidence.dsr)
                 or not 0.0 <= holdout_evidence.dsr <= 1.0):
-            holdout_failures.append("holdout evidence DSR must be finite and within [0, 1]")
+            problem = "holdout evidence DSR must be finite and within [0, 1]"
+            holdout_failures.append(problem)
+            holdout_integrity_problems.append(problem)
         elif math.isfinite(holdout_dsr) and not _close(holdout_evidence.dsr, holdout_dsr):
-            holdout_failures.append(
-                "holdout evidence DSR does not match the recomputed DSR from holdout trades"
-            )
-        holdout_decision = "PASS" if not holdout_failures else (
-            "RULED OUT" if holdout_summary["trade_count"] >= criteria.min_trades
-            else "INCONCLUSIVE"
+            problem = "holdout evidence DSR does not match the recomputed DSR from holdout trades"
+            holdout_failures.append(problem)
+            holdout_integrity_problems.append(problem)
+        holdout_decision = (
+            "INCONCLUSIVE" if holdout_integrity_problems
+            else ("PASS" if not holdout_failures else (
+                "RULED OUT" if holdout_summary["trade_count"] >= criteria.min_trades
+                else "INCONCLUSIVE"
+            ))
         )
         mark_preregistration_status(str(preregistration_path), hypothesis_id, holdout_decision.replace(" ", "_") if holdout_decision == "RULED OUT" else holdout_decision, {
             "decision": holdout_decision, "stage": "holdout", "reasons": holdout_failures,
