@@ -138,8 +138,14 @@ def mark_preregistration_status(path: str | Path, hypothesis_id: str,
     matches = [row for row in rows if str(row.get("hypothesis_id", "")).strip().casefold() == key]
     if len(matches) != 1:
         raise ValueError("pre-registration must exist exactly once to update status")
-    if matches[0].get("status") != "REGISTERED":
-        raise ValueError("pre-registration status is frozen and cannot be reset or overwritten")
+    current = matches[0].get("status")
+    terminal = {"DEV_RULED_OUT", "DEV_INCONCLUSIVE", "PASS", "RULED_OUT", "INCONCLUSIVE"}
+    if current in terminal:
+        raise ValueError("pre-registration status is terminal and cannot be reset or overwritten")
+    if current == "DEV_PASSED" and status not in {"PASS", "RULED_OUT", "INCONCLUSIVE"}:
+        raise ValueError("after DEV_PASSED, only a final holdout verdict may be recorded")
+    if current not in {"REGISTERED", "DEV_PASSED"}:
+        raise ValueError(f"invalid pre-registration status transition from {current!r}")
     matches[0]["status"] = status
     matches[0]["result"] = details or {}
     file_path.write_text(json.dumps(rows, indent=2) + "\\n", encoding="utf-8")
