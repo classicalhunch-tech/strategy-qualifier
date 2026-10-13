@@ -34,6 +34,7 @@ class PreRegistration:
     holdout_start: str
     holdout_end: str
     min_signal_trades: int
+    min_walk_forward_mean_coefficient: float
     alpha: float
     min_trades: int
     min_expectancy: float
@@ -58,6 +59,8 @@ class PreRegistration:
             raise ValueError("pre-registration must be frozen before data is inspected")
         if self.min_signal_trades < 1 or self.min_trades < 1:
             raise ValueError("N* and min_trades must be >= 1")
+        if not math.isfinite(self.min_walk_forward_mean_coefficient) or self.min_walk_forward_mean_coefficient <= 0:
+            raise ValueError("min_walk_forward_mean_coefficient must be finite and > 0, fixed before testing")
         if not math.isfinite(self.alpha) or not 0 < self.alpha < 1:
             raise ValueError("alpha must be between 0 and 1")
         if not math.isfinite(self.min_expectancy):
@@ -163,8 +166,12 @@ class DevelopmentEvidence:
     dsr: float
     bootstrap_90ci_lower: float
     signal_trade_count: int
+    random_entry_repetitions: int
+    bootstrap_block_size: int
+    bootstrap_repetitions: int
+    dsr_trials: int
 
-    def failures(self, prereg: PreRegistration) -> list[str]:
+    def failures(self, prereg: PreRegistration, expected_trials: int) -> list[str]:
         fail: list[str] = []
         coeffs = self.walk_forward_coefficients
         if len(coeffs) < 3 or not all(math.isfinite(x) for x in coeffs):
@@ -177,8 +184,8 @@ class DevelopmentEvidence:
                 fail.append("walk-forward: not a majority of folds positive")
             if negative >= 2:
                 fail.append("walk-forward: 2 or more folds flip sign")
-            if mean_coef <= 0:
-                fail.append("walk-forward: mean coefficient is not positive")
+            if mean_coef <= prereg.min_walk_forward_mean_coefficient:
+                fail.append("walk-forward: mean coefficient does not exceed the frozen stability floor")
         numeric = {
             "session_coefficient": self.session_coefficient,
             "session_cluster_robust_se": self.session_cluster_robust_se,
@@ -206,6 +213,12 @@ class DevelopmentEvidence:
             fail.append("development DSR must be > 0.90")
         if not self.bootstrap_90ci_lower > 0:
             fail.append("development 90% block-bootstrap CI lower bound must be > 0")
+        if self.random_entry_repetitions != 5000:
+            fail.append("random-entry baseline must use exactly 5000 repetitions")
+        if self.bootstrap_block_size != 5 or self.bootstrap_repetitions < 1000:
+            fail.append("development block bootstrap must use block size 5 and at least 1000 repetitions")
+        if self.dsr_trials != expected_trials:
+            fail.append(f"development DSR trial count {self.dsr_trials} does not match ledger count {expected_trials}")
         if self.signal_trade_count < prereg.min_signal_trades:
             fail.append(
                 f"N* not met: {self.signal_trade_count} signal trades < {prereg.min_signal_trades}"
@@ -223,8 +236,11 @@ class HoldoutEvidence:
     variants_tested: int = 1
     spearman_rho: float | None = None
     winner_oos_percentile: float | None = None
+    bootstrap_block_size: int = 5
+    bootstrap_repetitions: int = 10000
+    dsr_trials: int = 1
 
-    def failures(self) -> list[str]:
+    def failures(self, expected_trials: int) -> list[str]:
         fail: list[str] = []
         values = (self.bif, self.dev_mean_r, self.holdout_mean_r,
                   self.bootstrap_90ci_lower, self.dsr)
@@ -237,6 +253,10 @@ class HoldoutEvidence:
             fail.append("BIF must be strictly between 0.5 and 1.5")
         if not self.bootstrap_90ci_lower > 0:
             fail.append("holdout 90% block-bootstrap CI lower bound must be > 0")
+        if self.bootstrap_block_size != 5 or self.bootstrap_repetitions < 1000:
+            fail.append("holdout block bootstrap must use block size 5 and at least 1000 repetitions")
+        if self.dsr_trials != expected_trials:
+            fail.append(f"holdout DSR trial count {self.dsr_trials} does not match development ledger count {expected_trials}")
         if not self.dsr > 0.90:
             fail.append("holdout DSR must be > 0.90 using the same dev trial count")
         if self.variants_tested > 1:
