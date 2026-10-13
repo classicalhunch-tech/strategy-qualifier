@@ -7,11 +7,13 @@ ledger before the holdout callback is invoked, so failed callbacks still consume
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
 from typing import Callable, Iterable
+
+import numpy as np
 
 from strategy_qualifier.backtest import Trade, summarize_trades
 from strategy_qualifier.protocol import record_holdout_once
@@ -129,7 +131,7 @@ def qualify_strategy(
     add_entry(
         str(dev_ledger_path), hypothesis_id, "dev",
         float(dev_summary["expectancy"]),
-        (float(__import__("numpy").std([t.net_pnl for t in dev_rows], ddof=1)
+        (float(np.std([t.net_pnl for t in dev_rows], ddof=1)
                / math.sqrt(len(dev_rows))) if len(dev_rows) > 1 else 0.0),
         int(dev_summary["trade_count"]), "EXPLORATORY",
         notes=f"code={code_version}; data={dev_data_version}; trials_used={trials}",
@@ -168,7 +170,7 @@ def qualify_strategy(
             "reasons": holdout_failures,
         })
         return QualificationResult(
-            hypothesis_id, holdout_decision, "holdout", dev_summary, (),
+            hypothesis_id, holdout_decision, "holdout", dev_summary, tuple(holdout_failures),
             dev_dsr if math.isfinite(dev_dsr) else None,
             holdout_summary, holdout_decision,
         )
