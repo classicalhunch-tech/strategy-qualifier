@@ -113,6 +113,8 @@ def test_any_development_gate_failure_prevents_holdout(tmp_path):
         session_p_value=0.01, random_entry_p_value=0.01,
         observed_mean_r=1.8, random_entry_90th_percentile_r=0.5,
         dsr=0.99, bootstrap_90ci_lower=-0.1, signal_trade_count=40,
+        random_entry_repetitions=5000, bootstrap_block_size=5,
+        bootstrap_repetitions=10000, dsr_trials=1,
     )
     result = qualify_strategy(**run_args(
         tmp_path, dev_evidence=bad,
