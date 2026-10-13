@@ -85,13 +85,7 @@ Signals are generated from past/current bars only. The last bar is not queried b
 
 ## Development/holdout qualification pipeline
 
-The generic OHLC path can also run a complete research qualification: it backtests
-the development segment, applies caller-supplied gates, and evaluates the frozen
-strategy on the holdout segment only if development passes. The split is positional
-and chronological: `split_index` is the first holdout candle. The strategy sees
-only history available through each candle close; earlier candles remain available
-as holdout warm-up context, while pre-split signals are excluded from holdout
-trades.
+The generic OHLC path runs a strict research qualification. It requires a frozen pre-registration record, a complete development-evidence bundle, a complete holdout-evidence bundle, and passing base performance gates. Missing evidence fails closed. The split is positional and chronological: `split_index` is the first holdout candle. The strategy sees only history available through each candle close; earlier candles remain available as holdout warm-up context, while pre-split signals are excluded from holdout trades. The holdout callback is reserved single-use before execution.
 
 ```python
 import pandas as pd
@@ -159,3 +153,54 @@ pytest
 Selected code is being adapted from [classicalhunch-tech/A-stratergy-fork](https://github.com/classicalhunch-tech/A-stratergy-fork). The original repository is kept separate and is not modified by this project. Review the source repository's license before redistributing or reusing its code.
 
 See [docs/architecture.md](docs/architecture.md) and [docs/research_protocol.md](docs/research_protocol.md).
+
+
+## Mandatory qualification gates (strict mode)
+
+A strategy cannot receive `PASS` unless all applicable gates below pass. The
+strict API requires a frozen `PreRegistration`, `DevelopmentEvidence`, and a
+`HoldoutEvidence` returned by the holdout evidence builder. The evidence must be
+computed from the matching development/holdout trade ledger using the research
+utilities; the gate objects are not a substitute for running those analyses.
+
+**Before any test:** register a complete pre-registration once using
+`register_preregistration(preregistration, "research/preregistration.json")`.
+The record freezes the hypothesis, exact setup and exit rules, dev/holdout windows,
+N*, alpha, base thresholds and falsification criteria. A later registration with
+the same hypothesis ID is refused, and the qualification API verifies the record
+hash before running.
+
+**Development gates — every item is mandatory:**
+
+- Walk-forward: at least three finite folds, a majority positive, fewer than two negative folds, and a positive mean coefficient.
+- Session-vs-outside: positive session coefficient, valid cluster-robust standard error, and p-value `<= alpha`.
+- Random-entry baseline: p-value `<= alpha` and observed mean R strictly above the random-entry 90th percentile.
+- Deflated Sharpe Ratio strictly `> 0.90`, calculated using the development trial ledger.
+- Moving block-bootstrap 90% confidence interval lower bound strictly `> 0`.
+- N*: observed signal-trade count must be at least the frozen pre-registered minimum.
+- Base trade-count, expectancy, and drawdown criteria must also pass.
+
+If any development gate fails, the holdout callback is not called. A result with
+insufficient data is `INCONCLUSIVE`; a sufficiently sampled failed hypothesis is
+`RULED OUT`.
+
+**Holdout gates — every item is mandatory:**
+
+- Backtest Inflation Factor strictly between `0.5` and `1.5`, with no sign flip.
+- If multiple variants were tested, Spearman rank correlation strictly `> 0.5` and the in-sample winner's out-of-sample percentile strictly `> 0.5`.
+- Moving block-bootstrap 90% confidence interval lower bound strictly `> 0`.
+- Holdout DSR strictly `> 0.90`, using the same development trial count.
+- Base trade-count, expectancy, and drawdown criteria must also pass.
+
+A holdout attempt is recorded before the callback runs. Errors still consume the
+attempt. Do not reset the holdout ledger, lower N*, adjust thresholds after seeing
+results, or reuse the holdout for a changed strategy. Any strategy change is a new
+hypothesis ID. The ledgers are local research guardrails, not tamper-proof security
+boundaries. These statistical gates provide evidence, not a guarantee of future
+profitability.
+
+The strict API is explicit about research evidence so an operator can review the
+underlying calculations. Compute the walk-forward, cluster-robust session test,
+5,000-rep random-entry baseline, DSR, bootstrap, BIF and rank stability from the
+versioned trade/pool data, then pass their measured values to the evidence objects.
+A hand-entered or fabricated evidence bundle is not a valid research result.
