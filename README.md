@@ -92,40 +92,80 @@ import pandas as pd
 from strategy_qualifier.backtest import BacktestConfig, Signal
 from strategy_qualifier.qualification import QualificationCriteria
 from strategy_qualifier.qualification_data import qualify_bars
+from strategy_qualifier.qualification_gates import (
+    PreRegistration, DevelopmentEvidence, HoldoutEvidence,
+    register_preregistration,
+)
 
 bars = pd.read_csv("your_ohlc.csv", parse_dates=["timestamp"])
-# Ensure rows are sorted oldest-to-newest before choosing the split.
+# Sort oldest-to-newest and freeze the strategy before testing.
 
 def my_strategy(history: pd.DataFrame):
     i = len(history) - 1
-    # Replace this example condition with your frozen strategy rules.
+    # Replace with your frozen, causal strategy rules.
     if i >= 1 and history.close.iloc[i] > history.close.iloc[i - 1]:
         close = float(history.close.iloc[i])
-        return Signal(
-            bar_index=i, side=1, stop_loss=close - 2.0,
-            take_profit=close + 4.0, hypothesis_id="my-strategy-v1",
-        )
+        return Signal(bar_index=i, side=1, stop_loss=close - 2,
+                      take_profit=close + 4, hypothesis_id="my-strategy-v1")
     return None
 
 my_strategy.hypothesis_id = "my-strategy-v1"
 
+# Fill every field from your actual, frozen pre-registration document.
+prereg = PreRegistration(
+    hypothesis_id="my-strategy-v1",
+    question="REPLACE with one specific test question",
+    hypothesis="REPLACE with directional hypothesis",
+    expected_sign="positive", market="REPLACE", timeframe="REPLACE",
+    entry_rules="REPLACE", exit_rules="REPLACE", stop_rule="REPLACE",
+    target_rule="REPLACE", session_filter="REPLACE", direction_filter="REPLACE",
+    dev_start="2020-01-01", dev_end="2021-01-01",
+    holdout_start="2021-01-01", holdout_end="2022-01-01",
+    min_signal_trades=100, alpha=0.05, min_trades=100,
+    min_expectancy=0.0, max_drawdown=100.0,
+    falsification_criteria="REPLACE with pre-registered failure conditions",
+    registered_before_data=True,
+)
+register_preregistration(prereg, "research/preregistration.json")
+
+# IMPORTANT: compute these values from development trade/pool data with the
+# research utilities. Do not copy example numbers or manually guess evidence.
+dev_evidence = DevelopmentEvidence(
+    walk_forward_coefficients=(...), session_coefficient=...,
+    session_cluster_robust_se=..., session_p_value=...,
+    random_entry_p_value=..., observed_mean_r=...,
+    random_entry_90th_percentile_r=..., dsr=...,
+    bootstrap_90ci_lower=..., signal_trade_count=...,
+)
+
+# Compute HoldoutEvidence from the actual holdout output only. This callback
+# runs only after all development gates pass and the holdout is reserved.
+def holdout_evidence_builder(holdout_trades, holdout_bars):
+    return HoldoutEvidence(
+        bif=..., dev_mean_r=..., holdout_mean_r=...,
+        bootstrap_90ci_lower=..., dsr=...,
+        # Include these only when multiple variants were tested:
+        variants_tested=1,
+    )
+
 result = qualify_bars(
-    bars=bars,
-    strategy=my_strategy,
-    split_index=int(len(bars) * 0.7),  # first 70% development, remaining holdout
+    bars=bars, strategy=my_strategy, split_index=int(len(bars) * 0.7),
+    preregistration=prereg,
+    preregistration_path="research/preregistration.json",
+    development_evidence=dev_evidence,
+    holdout_evidence_builder=holdout_evidence_builder,
     criteria=QualificationCriteria(
-        min_trades=30,
-        min_expectancy=0.0,
-        max_drawdown=100.0,
-        # Set min_dsr only if you have chosen and justified a threshold.
+        min_trades=prereg.min_trades,
+        min_expectancy=prereg.min_expectancy,
+        max_drawdown=prereg.max_drawdown,
     ),
     dev_ledger_path="research/dev_ledger.csv",
     holdout_ledger_path="research/holdout_ledger.json",
-    code_version="your-frozen-commit-or-version",
-    data_version="symbol-timeframe-provider-and-dataset-version",
+    code_version="your-frozen-commit",
+    data_version="symbol-timeframe-provider-dataset-version",
     config=BacktestConfig(spread=0.2, slippage_per_side=0.05),
 )
-print(result.decision, result.metrics, result.holdout_metrics)
+print(result.decision, result.reasons)
 ```
 
 The criteria above are an example only, not recommended trading thresholds. Use a
