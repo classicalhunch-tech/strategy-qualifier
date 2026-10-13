@@ -207,7 +207,10 @@ def qualify_strategy(
                 "dsr": holdout_evidence.dsr,
                 "variants_tested": holdout_evidence.variants_tested,
                 "spearman_rho": holdout_evidence.spearman_rho,
-                "winner_oos_percentile": holdout_evidence.winner_oos_percentile,\n                "bootstrap_block_size": holdout_evidence.bootstrap_block_size,\n                "bootstrap_repetitions": holdout_evidence.bootstrap_repetitions,\n                "dsr_trials": holdout_evidence.dsr_trials,
+                "winner_oos_percentile": holdout_evidence.winner_oos_percentile,
+                "bootstrap_block_size": holdout_evidence.bootstrap_block_size,
+                "bootstrap_repetitions": holdout_evidence.bootstrap_repetitions,
+                "dsr_trials": holdout_evidence.dsr_trials,
             },
             "reasons": holdout_failures,
         })
