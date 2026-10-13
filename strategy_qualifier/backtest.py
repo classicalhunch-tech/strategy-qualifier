@@ -182,3 +182,78 @@ def run_backtest(
         next_available_bar = exit_bar + 1
 
     return trades
+
+def run_strategy_backtest(
+    bars: pd.DataFrame,
+    strategy,
+    config: BacktestConfig | None = None,
+) -> list[Trade]:
+    """Generate signals chronologically, then evaluate them with the OHLC engine.
+
+    strategy is a callable receiving a copy of bars available through the
+    current candle close. It may return None, one Signal, or an iterable of
+    Signals. Every emitted signal must have bar_index == len(history) - 1.
+    The final candle is not queried because a signal there cannot enter on a
+    following candle. This interface works with any strategy; it contains no
+    strategy-specific trading rules.
+    """
+    if not callable(strategy):
+        raise TypeError("strategy must be callable: strategy(history)")
+
+    if not isinstance(bars, pd.DataFrame):
+        raise ValueError("bars must be a pandas DataFrame")
+    if len(bars) < 2:
+        return []
+
+    generated: list[Signal] = []
+    for end in range(1, len(bars)):
+        history = bars.iloc[:end].copy()
+        result = strategy(history)
+        if result is None:
+            continue
+        if isinstance(result, Signal):
+            current = [result]
+        else:
+            try:
+                current = list(result)
+            except TypeError as exc:
+                raise TypeError("strategy must return None, Signal, or an iterable of Signals") from exc
+        current_bar = end - 1
+        for signal in current:
+            if not isinstance(signal, Signal):
+                raise TypeError("strategy outputs must be Signal instances")
+            if signal.bar_index != current_bar:
+                raise ValueError(
+                    f"strategy may only emit a signal for the current bar ({current_bar})"
+                )
+            generated.append(signal)
+
+    return run_backtest(bars, generated, config)
+
+
+def summarize_trades(trades: Iterable[Trade]) -> dict[str, float | int]:
+    """Return compact, strategy-agnostic performance metrics for a trade list."""
+    rows = list(trades)
+    pnl = [float(trade.net_pnl) for trade in rows]
+    wins = [value for value in pnl if value > 0]
+    losses = [value for value in pnl if value < 0]
+    equity = 0.0
+    peak = 0.0
+    max_drawdown = 0.0
+    for value in pnl:
+        equity += value
+        peak = max(peak, equity)
+        max_drawdown = max(max_drawdown, peak - equity)
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
+    profit_factor = gross_profit / gross_loss if gross_loss else (float("inf") if gross_profit else 0.0)
+    return {
+        "trade_count": len(rows),
+        "net_pnl": sum(pnl),
+        "win_rate": len(wins) / len(rows) if rows else 0.0,
+        "expectancy": sum(pnl) / len(rows) if rows else 0.0,
+        "profit_factor": profit_factor,
+        "max_drawdown": max_drawdown,
+        "average_r": sum(trade.r_multiple for trade in rows) / len(rows) if rows else 0.0,
+    }
+
