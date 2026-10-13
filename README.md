@@ -24,6 +24,42 @@ Initial scaffold. The first migration brings in selected, inspectable research p
 4. **Research guardrails:** dev/holdout separation, single-use holdout checks, hypothesis ledger, reproducible configs.
 5. **Candidate generator (later):** propose bounded hypotheses; it must not silently tune on holdout data.
 
+## Test any strategy
+
+Implement a callable that receives a DataFrame containing only bars available through the current candle close. Return `None` or a `Signal` for that current bar. The qualifier enters on the following bar and applies the configured costs and OHLC exit rules. This interface is strategy-agnostic: your strategy rules belong in your own function/module, not in the qualifier.
+
+```python
+import pandas as pd
+from strategy_qualifier.backtest import (
+    BacktestConfig, Signal, run_strategy_backtest, summarize_trades,
+)
+
+bars = pd.read_csv("your_ohlc.csv")  # requires open, high, low, close columns
+
+def my_strategy(history: pd.DataFrame):
+    i = len(history) - 1
+    # Replace this example condition with your own strategy rules.
+    if i >= 1 and history.close.iloc[i] > history.close.iloc[i - 1]:
+        entry = float(history.close.iloc[i])
+        return Signal(
+            bar_index=i,
+            side=1,
+            stop_loss=entry - 2.0,
+            take_profit=entry + 4.0,
+            hypothesis_id="my-strategy-v1",
+        )
+    return None
+
+trades = run_strategy_backtest(
+    bars, my_strategy,
+    BacktestConfig(spread=0.2, slippage_per_side=0.05),
+)
+print(summarize_trades(trades))
+pd.DataFrame([trade.__dict__ for trade in trades]).to_csv("trade_ledger.csv", index=False)
+```
+
+Signals are generated from past/current bars only. The last bar is not queried because it has no next bar for entry. The engine is an OHLC research simulator, not a tick-accurate fill model.
+
 ## Quick start
 
 Python 3.11 is the initial target.
