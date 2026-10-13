@@ -83,6 +83,45 @@ pd.DataFrame([trade.__dict__ for trade in trades]).to_csv("trade_ledger.csv", in
 Signals are generated from past/current bars only. The last bar is not queried because it has no next bar for entry. Set `entry_price=...` on a `Signal` to model a resting limit/retest entry; `entry_expiry_bars` controls how long it waits. The engine is an OHLC research simulator, not a tick-accurate fill model.
 
 
+## Automatic end-to-end qualification (recommended)
+
+Use `qualify_bars_automatic()` to have the qualifier run its own research utilities rather than accepting caller-entered statistics. It computes the five-fold purged/embargoed walk-forward evidence, cluster-robust session comparison, 5,000-repetition stratified random-entry baseline, ledger-counted DSR, and 90% moving-block-bootstrap lower bound. Only after development passes and the single-use holdout is reserved does it compute holdout DSR, bootstrap, BIF and (when applicable) variant rank stability.
+
+The one strategy-specific input is a **candidate-pool builder**. Random-entry testing is only meaningful if the pool contains all eligible alternative entries with the same direction, exit, stop/target and transaction-cost assumptions as the tested strategy. The qualifier deliberately refuses to invent that pool. The builder receives development bars only and must return a DataFrame with `entry_time`, `direction`, `net_r`, and `is_signal` columns. `net_r` must be net of the same costs used by the backtest.
+
+```python
+from strategy_qualifier.qualification import QualificationCriteria
+from strategy_qualifier.qualification_data import qualify_bars_automatic
+
+# preregistration must already be registered and frozen before this call.
+# candidate_pool_builder(dev_bars, dev_trades) must generate ALL eligible
+# alternative entries using the same execution/cost model; do not use only
+# trades selected by the signal.
+result = qualify_bars_automatic(
+    bars=bars,
+    strategy=my_strategy,
+    split_index=split_index,  # fixed before inspecting results
+    preregistration=prereg,
+    preregistration_path="research/preregistration.json",
+    candidate_pool_builder=candidate_pool_builder,
+    criteria=QualificationCriteria(
+        min_trades=prereg.min_trades,
+        min_expectancy=prereg.min_expectancy,
+        max_drawdown=prereg.max_drawdown,
+    ),
+    dev_ledger_path="research/ledger.csv",
+    holdout_ledger_path="research/holdout-ledger.json",
+    code_version="frozen-git-commit",
+    data_version="dataset-checksum-or-version",
+    config=BacktestConfig(spread=0.2, slippage_per_side=0.05),
+)
+print(result.decision, result.reasons)
+```
+
+For a multi-variant study, provide the pre-registered `variants_tested` count and aligned development/holdout score arrays so the IS/OOS rank-stability gate can run. Do not include unregistered variants after seeing holdout results. A PASS means the configured research gates passed; it does not guarantee future profitability or replace forward paper-trading validation.
+
+The older `qualify_bars()` API remains available for externally computed evidence, but it is less automatic and should only be used when those values are independently reproducible. Do not manually guess or hardcode evidence.
+
 ## Development/holdout qualification pipeline
 
 The generic OHLC path runs a strict research qualification. It requires a frozen pre-registration record, a complete development-evidence bundle, a complete holdout-evidence bundle, and passing base performance gates. Missing evidence fails closed. The split is positional and chronological: `split_index` is the first holdout candle. The strategy sees only history available through each candle close; earlier candles remain available as holdout warm-up context, while pre-split signals are excluded from holdout trades. The holdout callback is reserved single-use before execution.
