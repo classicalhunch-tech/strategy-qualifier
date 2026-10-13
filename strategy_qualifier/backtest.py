@@ -6,6 +6,7 @@ open. This deliberately small engine does not generate signals or place live ord
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Iterable
 
 import pandas as pd
@@ -24,6 +25,8 @@ class Signal:
     def validate(self, n_bars: int) -> None:
         if self.side not in (-1, 1):
             raise ValueError("signal side must be +1 (long) or -1 (short)")
+        if not math.isfinite(self.stop_loss) or not math.isfinite(self.take_profit):
+            raise ValueError("stop_loss and take_profit must be finite")
         if not 0 <= self.bar_index < n_bars - 1:
             raise ValueError("signal bar_index must have a following entry bar")
         if self.side == 1 and not self.stop_loss < self.take_profit:
@@ -40,8 +43,10 @@ class BacktestConfig:
     max_holding_bars: int | None = None
 
     def validate(self) -> None:
-        if min(self.spread, self.slippage_per_side,
-               self.commission_per_unit_per_side) < 0:
+        values = (self.spread, self.slippage_per_side, self.commission_per_unit_per_side)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("spread, slippage and commission must be finite")
+        if min(values) < 0:
             raise ValueError("spread, slippage and commission must be non-negative")
         if self.max_holding_bars is not None and self.max_holding_bars < 1:
             raise ValueError("max_holding_bars must be >= 1 or None")
@@ -93,7 +98,7 @@ def run_backtest(
     frame = frame.loc[:, ["open", "high", "low", "close"]].apply(
         pd.to_numeric, errors="coerce"
     )
-    if frame.isna().any().any():
+    if frame.isna().any().any() or not frame.map(math.isfinite).all().all():
         raise ValueError("OHLC bars must contain finite numeric values")
     if not ((frame["high"] >= frame[["open", "close", "low"]].max(axis=1)).all()
             and (frame["low"] <= frame[["open", "close", "high"]].min(axis=1)).all()):
@@ -116,9 +121,9 @@ def run_backtest(
             continue
         entry_open = float(frame.iloc[entry_bar]["open"])
         entry_price = entry_open + signal.side * half_cost
-        if signal.side == 1 and entry_price <= signal.stop_loss:
+        if signal.side == 1 and not signal.stop_loss < entry_price < signal.take_profit:
             continue
-        if signal.side == -1 and entry_price >= signal.stop_loss:
+        if signal.side == -1 and not signal.take_profit < entry_price < signal.stop_loss:
             continue
         risk = abs(entry_price - signal.stop_loss)
         if risk <= 0:
