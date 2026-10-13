@@ -23,9 +23,14 @@ def _validate_chronology(bars: pd.DataFrame) -> None:
             if str(column).strip().lower() == "timestamp"
         )
         timestamps = pd.to_datetime(bars[timestamp_column], errors="raise")
-        if not timestamps.is_monotonic_increasing:
+        if timestamps.isna().any() or not (
+            timestamps.is_monotonic_increasing and timestamps.is_unique
+        ):
             raise ValueError("bars must be in chronological order")
-    elif isinstance(bars.index, pd.DatetimeIndex) and not bars.index.is_monotonic_increasing:
+    elif isinstance(bars.index, pd.DatetimeIndex) and (
+        bars.index.isna().any()
+        or not (bars.index.is_monotonic_increasing and bars.index.is_unique)
+    ):
         raise ValueError("bars must be in chronological order")
 
 
