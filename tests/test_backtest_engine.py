@@ -49,3 +49,19 @@ def test_invalid_signal_direction_is_rejected():
     data = bars([(100, 101, 99, 100), (100, 101, 99, 100)])
     with pytest.raises(ValueError):
         run_backtest(data, [Signal(0, 0, 95, 105)])
+
+
+def test_rejects_non_finite_prices_and_costs():
+    data = bars([(100, 101, 99, 100), (100, 101, 99, 100)])
+    bad = bars([(100, float("inf"), 99, 100), (100, 101, 99, 100)])
+    with pytest.raises(ValueError):
+        run_backtest(bad, [Signal(0, 1, 95, 105)])
+    with pytest.raises(ValueError):
+        run_backtest(data, [Signal(0, 1, 95, 105)],
+                     BacktestConfig(spread=float("nan")))
+
+
+def test_skips_entry_beyond_target_after_gap_open():
+    data = bars([(100, 101, 99, 100), (106, 108, 105, 107)])
+    trades = run_backtest(data, [Signal(0, 1, 95, 105)])
+    assert trades == []
