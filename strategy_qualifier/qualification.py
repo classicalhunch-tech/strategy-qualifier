@@ -127,7 +127,7 @@ def qualify_strategy(
     dev_dsr_result = deflated_sharpe(dev_returns, n_trials=trials)
     dev_dsr = float(dev_dsr_result["dsr"])
     dev_failures = _failed_gates(dev_summary, criteria, dev_dsr if math.isfinite(dev_dsr) else None)
-    dev_failures.extend(development_evidence.failures(preregistration))
+    dev_failures.extend(development_evidence.failures(preregistration, trials))
     if dev_summary["trade_count"] < preregistration.min_trades:
         dev_failures.append(
             f"minimum dev trades not met: {dev_summary['trade_count']} < {preregistration.min_trades}"
@@ -181,7 +181,7 @@ def qualify_strategy(
             holdout_summary, criteria,
             holdout_dsr if math.isfinite(holdout_dsr) else None,
         )
-        holdout_failures.extend(holdout_evidence.failures())
+        holdout_failures.extend(holdout_evidence.failures(trials))
         holdout_decision = "PASS" if not holdout_failures else (
             "RULED OUT" if holdout_summary["trade_count"] >= criteria.min_trades
             else "INCONCLUSIVE"
@@ -207,7 +207,7 @@ def qualify_strategy(
                 "dsr": holdout_evidence.dsr,
                 "variants_tested": holdout_evidence.variants_tested,
                 "spearman_rho": holdout_evidence.spearman_rho,
-                "winner_oos_percentile": holdout_evidence.winner_oos_percentile,
+                "winner_oos_percentile": holdout_evidence.winner_oos_percentile,\n                "bootstrap_block_size": holdout_evidence.bootstrap_block_size,\n                "bootstrap_repetitions": holdout_evidence.bootstrap_repetitions,\n                "dsr_trials": holdout_evidence.dsr_trials,
             },
             "reasons": holdout_failures,
         })
