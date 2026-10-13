@@ -35,7 +35,9 @@ def evidence(n=40):
         session_coefficient=0.2, session_cluster_robust_se=0.05,
         session_p_value=0.01, random_entry_p_value=0.01,
         observed_mean_r=1.8, random_entry_90th_percentile_r=0.5,
-        dsr=0.99, bootstrap_90ci_lower=0.8, signal_trade_count=n,\n        random_entry_repetitions=5000, bootstrap_block_size=5,\n        bootstrap_repetitions=10000, dsr_trials=1,
+        dsr=0.99, bootstrap_90ci_lower=0.8, signal_trade_count=n,
+        random_entry_repetitions=5000, bootstrap_block_size=5,
+        bootstrap_repetitions=10000, dsr_trials=1,
     )
 
 
