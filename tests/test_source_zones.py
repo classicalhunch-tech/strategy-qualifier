@@ -6,7 +6,7 @@ import pandas as pd
 from strategy_qualifier.market.swings import find_swings
 from strategy_qualifier.market.structure import analyze_structure
 from strategy_qualifier.market.zones import find_zones, update_mitigation, ZoneType
-from strategy.test_structure import generate_bullish_sequence_data, generate_bearish_sequence_data
+from test_source_structure import generate_bullish_sequence_data, generate_bearish_sequence_data
 
 
 def test_bullish_zone_detection():
