@@ -148,7 +148,7 @@ def mark_preregistration_status(path: str | Path, hypothesis_id: str,
         raise ValueError(f"invalid pre-registration status transition from {current!r}")
     matches[0]["status"] = status
     matches[0]["result"] = details or {}
-    file_path.write_text(json.dumps(rows, indent=2) + "\\n", encoding="utf-8")
+    file_path.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
 
 
 @dataclass(frozen=True)
