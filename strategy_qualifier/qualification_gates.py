@@ -118,7 +118,31 @@ def verify_preregistration(preregistration: PreRegistration, path: str | Path) -
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     if row.get("sha256") != digest:
         raise ValueError("pre-registration differs from the frozen ledger entry")
+    if row.get("status") != "REGISTERED":
+        raise ValueError(
+            f"hypothesis is already in terminal/active state {row.get('status')!r}; "
+            "do not rerun it under the same hypothesis ID"
+        )
     return digest
+
+
+def mark_preregistration_status(path: str | Path, hypothesis_id: str,
+                                status: str, details: dict | None = None) -> None:
+    """Record a one-way status transition; never resets a hypothesis to REGISTERED."""
+    allowed = {"DEV_RULED_OUT", "DEV_INCONCLUSIVE", "DEV_PASSED", "PASS", "RULED_OUT", "INCONCLUSIVE"}
+    if status not in allowed:
+        raise ValueError(f"unsupported pre-registration status: {status}")
+    file_path = Path(path)
+    rows = json.loads(file_path.read_text(encoding="utf-8"))
+    key = hypothesis_id.strip().casefold()
+    matches = [row for row in rows if str(row.get("hypothesis_id", "")).strip().casefold() == key]
+    if len(matches) != 1:
+        raise ValueError("pre-registration must exist exactly once to update status")
+    if matches[0].get("status") != "REGISTERED":
+        raise ValueError("pre-registration status is frozen and cannot be reset or overwritten")
+    matches[0]["status"] = status
+    matches[0]["result"] = details or {}
+    file_path.write_text(json.dumps(rows, indent=2) + "\\n", encoding="utf-8")
 
 
 @dataclass(frozen=True)
