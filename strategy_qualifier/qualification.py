@@ -19,7 +19,7 @@ from strategy_qualifier.research.deflated_sharpe import deflated_sharpe
 from strategy_qualifier.research.ledger import add_entry, count_trials
 from strategy_qualifier.qualification_gates import (
     DevelopmentEvidence, HoldoutEvidence, PreRegistration,
-    verify_preregistration,
+    mark_preregistration_status, verify_preregistration,
 )
 
 
@@ -117,8 +117,8 @@ def qualify_strategy(
         raise ValueError("code_version and both data versions are required")
     criteria.validate()
     prereg_hash = verify_preregistration(preregistration, preregistration_path)
-    if criteria.min_trades < preregistration.min_trades:
-        raise ValueError("qualification min_trades cannot be lower than pre-registered minimum")
+    if criteria.min_trades != preregistration.min_trades:
+        raise ValueError("qualification min_trades must exactly match the frozen pre-registration")
     if criteria.min_expectancy != preregistration.min_expectancy or criteria.max_drawdown != preregistration.max_drawdown:
         raise ValueError("criteria differ from frozen pre-registration")
 
@@ -142,12 +142,26 @@ def qualify_strategy(
     )
     if dev_failures:
         enough_data = dev_summary["trade_count"] >= max(criteria.min_trades, preregistration.min_signal_trades)
+        decision = "RULED OUT" if enough_data else "INCONCLUSIVE"
+        status = "DEV_RULED_OUT" if decision == "RULED OUT" else "DEV_INCONCLUSIVE"
+        mark_preregistration_status(str(preregistration_path), hypothesis_id, status, {
+            "decision": decision, "stage": "development", "reasons": dev_failures,
+            "metrics": dev_summary, "dsr": dev_dsr if math.isfinite(dev_dsr) else None,
+        })
+        add_entry(
+            str(dev_ledger_path), hypothesis_id, "dev",
+            float(dev_summary["expectancy"]), 0.0, int(dev_summary["trade_count"]),
+            decision, notes="mandatory development gate failure; " + "; ".join(dev_failures),
+        )
         return QualificationResult(
-            hypothesis_id, "RULED OUT" if enough_data else "INCONCLUSIVE",
-            "development", dev_summary, tuple(dev_failures),
+            hypothesis_id, decision, "development", dev_summary, tuple(dev_failures),
             dev_dsr if math.isfinite(dev_dsr) else None,
         )
 
+    mark_preregistration_status(str(preregistration_path), hypothesis_id, "DEV_PASSED", {
+        "decision": "DEV PASSED", "stage": "development", "metrics": dev_summary,
+        "dsr": dev_dsr if math.isfinite(dev_dsr) else None,
+    })
     record_holdout_once(holdout_ledger_path, hypothesis_id, {
         "status": "STARTED", "decision": "INCONCLUSIVE",
         "code_version": code_version, "data_version": holdout_data_version,
@@ -172,6 +186,15 @@ def qualify_strategy(
             "RULED OUT" if holdout_summary["trade_count"] >= criteria.min_trades
             else "INCONCLUSIVE"
         )
+        mark_preregistration_status(str(preregistration_path), hypothesis_id, holdout_decision.replace(" ", "_") if holdout_decision == "RULED OUT" else holdout_decision, {
+            "decision": holdout_decision, "stage": "holdout", "reasons": holdout_failures,
+            "metrics": holdout_summary,
+        })
+        add_entry(
+            str(dev_ledger_path), hypothesis_id, "holdout",
+            float(holdout_summary["expectancy"]), 0.0, int(holdout_summary["trade_count"]),
+            holdout_decision, notes="final holdout verdict; " + "; ".join(holdout_failures),
+        )
         _update_reserved_holdout(holdout_ledger_path, hypothesis_id, {
             "status": "COMPLETED", "decision": holdout_decision,
             "metrics": holdout_summary,
@@ -194,6 +217,13 @@ def qualify_strategy(
             holdout_summary, holdout_decision,
         )
     except Exception as exc:
+        try:
+            mark_preregistration_status(str(preregistration_path), hypothesis_id, "INCONCLUSIVE", {
+                "decision": "INCONCLUSIVE", "stage": "holdout",
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+        except Exception:
+            pass
         _update_reserved_holdout(holdout_ledger_path, hypothesis_id, {
             "status": "ERROR_HOLDOUT_CONSUMED",
             "error": f"{type(exc).__name__}: {exc}",
