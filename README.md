@@ -6,7 +6,7 @@ A standalone research and qualification engine for testing trading hypotheses be
 
 ## Current status
 
-Initial scaffold. The first migration brings in selected, inspectable research primitives and statistical tools from the separate source repository. No claim is made that the migrated code has passed tests until the test suite is actually run.
+The qualifier now includes two testing paths: a generic callback backtester for strategies you supply, and an extracted SMC replay engine preserving the fork's sweep → structure-break → flip-zone retest logic. Reusable statistical/research utilities are also being moved into this repository. CI is used to validate each migration.
 
 ## Design principles
 
@@ -16,15 +16,37 @@ Initial scaffold. The first migration brings in selected, inspectable research p
 - **Realistic evaluation:** include transaction costs, trade counts, uncertainty, stability, and baselines.
 - **No live execution:** this repository is a research/qualification tool, not an order-routing bot.
 
-## Planned layers
+## Extracted strategy and research tools
 
-1. **Market primitives:** ATR, confirmed swings, market structure, supply/demand zones, liquidity.
-2. **Backtest adapter:** a small, explicit interface that consumes frozen signals and models fills/costs without importing a live bot.
-3. **Statistical judge:** deflated Sharpe, block bootstrap, walk-forward checks, stability and random-entry baselines.
-4. **Research guardrails:** dev/holdout separation, single-use holdout checks, hypothesis ledger, reproducible configs.
-5. **Candidate generator (later):** propose bounded hypotheses; it must not silently tune on holdout data.
+- `strategy_qualifier.strategies.fork_smc`: the fork's SMC signal generator, retest state machine, original event-driven replay/backtest, session rules, MTF confluence/tagging, structure targets and causal MTF structure integration.
+- `strategy_qualifier.market`: ATR, swings, structure, structure state, zones, liquidity and MTF context.
+- `strategy_qualifier.research`: hypothesis ledger, deflated Sharpe, block bootstrap, walk-forward analysis, random-entry baseline, rank stability, Monte Carlo trade resampling, session-vs-outside analysis and backtest-inflation factor.
+- `strategy_qualifier.backtest`: separate generic callback engine for other strategies, including market and resting-limit entries.
+
+The source fork also contains dashboards, MT5/live execution, data-specific diagnostics and one-off patch scripts. Those are intentionally not imported into this research-only package; the qualifier should not need a live trading runtime to evaluate a strategy.
 
 ## Test any strategy
+
+For the extracted SMC strategy, use the fork-compatible replay engine:
+
+```python
+import pandas as pd
+from strategy_qualifier.strategies.fork_smc import run_backtest
+
+bars = pd.read_csv("your_ohlc.csv")  # timestamp, open, high, low, close
+result = run_backtest(
+    bars,
+    reward_multiple=2.0,
+    max_bars_to_retest=20,
+    spread=0.2,
+    slippage=0.05,
+    commission=0.0,
+)
+print(result.win_rate, result.expectancy, len(result.trades))
+```
+
+This preserves the SMC engine's own setup/retest lifecycle. Other strategies should use the generic callback interface below, rather than being forced into SMC rules.
+
 
 Implement a callable that receives a DataFrame containing only bars available through the current candle close. Return `None` or a `Signal` for that current bar. The qualifier enters on the following bar and applies the configured costs and OHLC exit rules. This interface is strategy-agnostic: your strategy rules belong in your own function/module, not in the qualifier.
 
