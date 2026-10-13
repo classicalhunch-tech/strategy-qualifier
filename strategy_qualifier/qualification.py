@@ -76,6 +76,11 @@ def _failed_gates(summary: dict, criteria: QualificationCriteria,
     return failures
 
 
+def _close(left: float, right: float) -> bool:
+    """Strictly compare independently recomputed research statistics."""
+    return math.isclose(float(left), float(right), rel_tol=1e-9, abs_tol=1e-12)
+
+
 def _update_reserved_holdout(path: str | Path, hypothesis_id: str, payload: dict) -> None:
     file_path = Path(path)
     rows = json.loads(file_path.read_text(encoding="utf-8"))
@@ -123,11 +128,28 @@ def qualify_strategy(
         raise ValueError("criteria differ from frozen pre-registration")
 
     dev_rows, dev_summary, dev_returns = _metrics(development_trades)
-    trials = max(1, count_trials(str(dev_ledger_path)) + 1)
+    trials = max(1, count_trials(str(dev_ledger_path), "dev") + 1)
     dev_dsr_result = deflated_sharpe(dev_returns, n_trials=trials)
     dev_dsr = float(dev_dsr_result["dsr"])
     dev_failures = _failed_gates(dev_summary, criteria, dev_dsr if math.isfinite(dev_dsr) else None)
     dev_failures.extend(development_evidence.failures(preregistration, trials))
+    if development_evidence.signal_trade_count != dev_summary["trade_count"]:
+        dev_failures.append(
+            "development evidence signal_trade_count does not match the actual development trades"
+        )
+    actual_dev_mean_r = float(np.mean(dev_returns)) if dev_returns else float("nan")
+    if (not math.isfinite(development_evidence.observed_mean_r)
+            or not _close(development_evidence.observed_mean_r, actual_dev_mean_r)):
+        dev_failures.append(
+            "development evidence observed_mean_r does not match the actual development trade returns"
+        )
+    if (not math.isfinite(development_evidence.dsr)
+            or not 0.0 <= development_evidence.dsr <= 1.0):
+        dev_failures.append("development evidence DSR must be finite and within [0, 1]")
+    elif math.isfinite(dev_dsr) and not _close(development_evidence.dsr, dev_dsr):
+        dev_failures.append(
+            "development evidence DSR does not match the recomputed DSR from development trades"
+        )
     if dev_summary["trade_count"] < preregistration.min_trades:
         dev_failures.append(
             f"minimum dev trades not met: {dev_summary['trade_count']} < {preregistration.min_trades}"
@@ -182,6 +204,25 @@ def qualify_strategy(
             holdout_dsr if math.isfinite(holdout_dsr) else None,
         )
         holdout_failures.extend(holdout_evidence.failures(trials))
+        actual_holdout_mean_r = float(np.mean(holdout_returns)) if holdout_returns else float("nan")
+        actual_dev_mean_r = float(np.mean(dev_returns)) if dev_returns else float("nan")
+        if (not math.isfinite(holdout_evidence.dev_mean_r)
+                or not _close(holdout_evidence.dev_mean_r, actual_dev_mean_r)):
+            holdout_failures.append(
+                "holdout evidence dev_mean_r does not match the actual development trade returns"
+            )
+        if (not math.isfinite(holdout_evidence.holdout_mean_r)
+                or not _close(holdout_evidence.holdout_mean_r, actual_holdout_mean_r)):
+            holdout_failures.append(
+                "holdout evidence holdout_mean_r does not match the actual holdout trade returns"
+            )
+        if (not math.isfinite(holdout_evidence.dsr)
+                or not 0.0 <= holdout_evidence.dsr <= 1.0):
+            holdout_failures.append("holdout evidence DSR must be finite and within [0, 1]")
+        elif math.isfinite(holdout_dsr) and not _close(holdout_evidence.dsr, holdout_dsr):
+            holdout_failures.append(
+                "holdout evidence DSR does not match the recomputed DSR from holdout trades"
+            )
         holdout_decision = "PASS" if not holdout_failures else (
             "RULED OUT" if holdout_summary["trade_count"] >= criteria.min_trades
             else "INCONCLUSIVE"
